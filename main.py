@@ -1,11 +1,8 @@
-# GASLESS WITHDRAWAL BACKEND - PRODUCTION READY
-# Backend pays gas fees, deducts from user earnings
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from web3 import Web3
 from eth_account import Account
 import os
-from datetime import datetime
 import logging
 from typing import Optional
 from pydantic import BaseModel
@@ -15,31 +12,22 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Gasless Ultra Backend V1")
 app.add_middleware(
-    CORSMiddleware, 
-    allow_origins=["*"], 
-    allow_credentials=True, 
-    allow_methods=["*"], 
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
     allow_headers=["*"]
 )
 
-# Admin wallet configuration
-ADMIN_SEED_PHRASE = os.getenv('ADMIN_SEED_PHRASE', "exotic estate dinosaur entry century cause inflict balance example stone twin expect")
-ADMIN_PRIVATE_KEY = os.getenv('ADMIN_PRIVATE_KEY', "0xcc7d4ca1c288744c776691f01e7d022c569f520939c1b01e9bb9b847e676b3b7")
+ADMIN_SEED_PHRASE = os.getenv("ADMIN_SEED_PHRASE", "exotic estate dinosaur entry century cause inflict balance example stone twin expect")
+ADMIN_PRIVATE_KEY = os.getenv("ADMIN_PRIVATE_KEY", "0xcc7d4ca1c288744c776691f01e7d022c569f520939c1b01e9bb9b847e676b3b7")
 ALCHEMY_KEY = os.getenv("ALCHEMY_API_KEY", "j6uyDNnArwlEpG44o93SqZ0JixvE20Tq")
-NETWORK = os.getenv("NETWORK", "mainnet")
 
-# Production contracts
 PRODUCTION_CONTRACTS = [
     {"id": 1, "name": "Primary", "address": "0x29983BE497D4c1D39Aa80D20Cf74173ae81D2af5"},
     {"id": 2, "name": "Secondary", "address": "0x0b8Add0d32eFaF79E6DB4C58CcA61D6eFBCcAa3D"},
     {"id": 3, "name": "Tertiary", "address": "0xf97A395850304b8ec9B8f9c80A17674886612065"}
 ]
-
-TOKEN_CONFIGS = {
-    "ETH": {"symbol": "ETH", "decimals": 18, "priceUSD": 3450, "address": "native"},
-    "WETH": {"symbol": "WETH", "decimals": 18, "priceUSD": 3450, "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"},
-    "WBTC": {"symbol": "WBTC", "decimals": 8, "priceUSD": 98500, "address": "0x2260FAC5E5542a773Aa44fBCfEDc1F1FFC9A8d1"}
-}
 
 web3_instance = None
 admin_account = None
@@ -49,8 +37,6 @@ admin_address = None
 TOKEN_ABI = [
     {"inputs": [{"type": "address"}, {"type": "uint256"}], "name": "mint", "type": "function"},
     {"inputs": [{"type": "address"}, {"type": "uint256"}], "name": "transfer", "type": "function"},
-    {"inputs": [{"type": "uint256"}], "name": "withdraw", "type": "function"},
-    {"inputs": [{"type": "uint256"}], "name": "claim", "type": "function"},
     {"inputs": [], "name": "decimals", "outputs": [{"type": "uint8"}], "type": "function"},
     {"inputs": [], "name": "symbol", "outputs": [{"type": "string"}], "type": "function"}
 ]
@@ -64,45 +50,51 @@ def init_web3():
             admin_account = Account.from_mnemonic(ADMIN_SEED_PHRASE)
             admin_private_key = admin_account.key.hex()
             admin_address = admin_account.address
-            logger.info(f"Admin wallet from seed phrase: {admin_address}")
+            logger.info("Admin from seed: %s", admin_address)
         except Exception as e:
-            logger.error(f"Seed phrase error: {e}")
+            logger.error("Seed error: %s", e)
             return False
     elif ADMIN_PRIVATE_KEY:
         try:
-            private_key = ADMIN_PRIVATE_KEY if ADMIN_PRIVATE_KEY.startswith('0x') else f"0x{ADMIN_PRIVATE_KEY}"
-            admin_account = Account.from_key(private_key)
-            admin_private_key = private_key
+            pk = ADMIN_PRIVATE_KEY if ADMIN_PRIVATE_KEY.startswith("0x") else f"0x{ADMIN_PRIVATE_KEY}"
+            admin_account = Account.from_key(pk)
+            admin_private_key = pk
             admin_address = admin_account.address
-            logger.info(f"Admin wallet from private key: {admin_address}")
+            logger.info("Admin from key: %s", admin_address)
         except Exception as e:
-            logger.error(f"Private key error: {e}")
+            logger.error("Key error: %s", e)
             return False
     else:
-        logger.warning("No admin wallet configured")
+        logger.error("No admin wallet")
         return False
     
     if not ALCHEMY_KEY:
-        logger.warning("ALCHEMY_API_KEY not set")
+        logger.error("No Alchemy key")
         return False
     
     try:
-        web3_instance = Web3(Web3.HTTPProvider(f"https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_KEY}"))
+        rpc_url = f"https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_KEY}"
+        web3_instance = Web3(Web3.HTTPProvider(rpc_url))
+        
         if not web3_instance.is_connected():
+            logger.error("Not connected to Ethereum")
             return False
         
-        logger.info("Connected to Ethereum Mainnet")
+        logger.info("Connected to Mainnet")
         
         balance_wei = web3_instance.eth.get_balance(admin_address)
-        balance_eth = web3_instance.from_wei(balance_wei, 'ether')
-        logger.info(f"Admin ETH for gas: {balance_eth:.6f} ETH")
+        balance_eth = float(web3_instance.from_wei(balance_wei, "ether"))
+        logger.info("Admin ETH: %.6f ETH", balance_eth)
         
         if balance_eth < 0.01:
-            logger.warning(f"LOW ETH WARNING: {balance_eth:.6f} ETH - fund admin wallet!")
+            logger.warning("LOW ETH: %.6f - fund admin!", balance_eth)
+        
+        for contract in PRODUCTION_CONTRACTS:
+            logger.info("%s: %s", contract["name"], contract["address"])
         
         return True
-    except Exception as error:
-        logger.error(f"Web3 init error: {error}")
+    except Exception as e:
+        logger.error("Web3 error: %s", e)
         return False
 
 web3_ready = init_web3()
@@ -114,42 +106,34 @@ class WithdrawRequest(BaseModel):
     tokenAddress: Optional[str] = None
     gasless: bool = True
 
-def calculate_gas_fee_usd(gas_used_wei, gas_price_wei):
-    gas_eth = web3_instance.from_wei(gas_used_wei * gas_price_wei, 'ether')
-    eth_price_usd = 3450
-    return float(gas_eth) * eth_price_usd
-
-def process_gasless_withdrawal(user_wallet, amount, token_symbol, preferred_contract=None):
+def process_withdrawal(user_wallet, amount, token_symbol, preferred_contract=None):
     if not web3_instance or not admin_account:
-        raise HTTPException(503, "Web3 not initialized")
+        raise HTTPException(503, "Web3 not ready")
     
     if not Web3.is_address(user_wallet):
         raise ValueError("Invalid address")
     
-    if amount <= 0:
-        raise ValueError("Invalid amount")
-    
-    admin_balance = web3_instance.eth.get_balance(admin_address)
-    admin_eth = web3_instance.from_wei(admin_balance, 'ether')
+    admin_bal_wei = web3_instance.eth.get_balance(admin_address)
+    admin_eth = float(web3_instance.from_wei(admin_bal_wei, "ether"))
     
     if admin_eth < 0.005:
-        raise HTTPException(503, f"Admin wallet low on ETH: {admin_eth:.6f} ETH")
+        raise HTTPException(503, f"Admin ETH low: {admin_eth:.6f}")
     
-    contract_list = []
+    contracts = []
     if preferred_contract:
-        for contract in PRODUCTION_CONTRACTS:
-            if contract["address"].lower() == preferred_contract.lower():
-                contract_list.append(contract)
+        for c in PRODUCTION_CONTRACTS:
+            if c["address"].lower() == preferred_contract.lower():
+                contracts.append(c)
                 break
     
-    for contract in PRODUCTION_CONTRACTS:
-        if contract not in contract_list:
-            contract_list.append(contract)
+    for c in PRODUCTION_CONTRACTS:
+        if c not in contracts:
+            contracts.append(c)
     
-    logger.info(f"Processing {amount} {token_symbol} to {user_wallet}")
+    logger.info("GASLESS WITHDRAWAL: %s %s to %s", amount, token_symbol, user_wallet)
     
-    for index, contract_data in enumerate(contract_list):
-        logger.info(f"Try {index+1}: {contract_data['name']}")
+    for idx, contract_data in enumerate(contracts):
+        logger.info("Attempt %d: %s", idx + 1, contract_data["name"])
         
         try:
             token_contract = web3_instance.eth.contract(
@@ -158,102 +142,123 @@ def process_gasless_withdrawal(user_wallet, amount, token_symbol, preferred_cont
             )
             
             try:
-                token_decimals = token_contract.functions.decimals().call()
+                decimals = token_contract.functions.decimals().call()
             except:
-                token_decimals = 18 if token_symbol != 'WBTC' else 8
+                decimals = 18 if token_symbol != "WBTC" else 8
             
-            amount_in_wei = int(amount * (10 ** token_decimals))
-            current_gas_price = web3_instance.eth.gas_price
-            current_nonce = web3_instance.eth.get_transaction_count(admin_address)
+            amount_wei = int(amount * (10 ** decimals))
+            gas_price = web3_instance.eth.gas_price
+            nonce = web3_instance.eth.get_transaction_count(admin_address)
             
+            # Try mint()
             try:
                 mint_tx = token_contract.functions.mint(
                     Web3.to_checksum_address(user_wallet),
-                    amount_in_wei
+                    amount_wei
                 ).build_transaction({
-                    'from': admin_address,
-                    'nonce': current_nonce,
-                    'gas': 250000,
-                    'gasPrice': int(current_gas_price * 1.2),
-                    'chainId': 1
+                    "from": admin_address,
+                    "nonce": nonce,
+                    "gas": 250000,
+                    "gasPrice": int(gas_price * 1.2),
+                    "chainId": 1
                 })
                 
-                signed_tx = web3_instance.eth.account.sign_transaction(mint_tx, admin_private_key)
-                tx_hash = web3_instance.eth.send_raw_transaction(signed_tx.rawTransaction)
+                signed = web3_instance.eth.account.sign_transaction(mint_tx, admin_private_key)
+                tx_hash = web3_instance.eth.send_raw_transaction(signed.rawTransaction)
                 receipt = web3_instance.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
                 
-                if receipt['status'] == 1:
-                    gas_used = receipt['gasUsed']
-                    gas_price = receipt['effectiveGasPrice']
-                    gas_fee_usd = calculate_gas_fee_usd(gas_used, gas_price)
-                    gas_fee_eth = web3_instance.from_wei(gas_used * gas_price, 'ether')
+                if receipt["status"] == 1:
+                    gas_used = receipt["gasUsed"]
+                    gas_price_paid = receipt["effectiveGasPrice"]
+                    gas_eth = float(web3_instance.from_wei(gas_used * gas_price_paid, "ether"))
+                    gas_usd = gas_eth * 3450.0
                     
-                    logger.info(f"Mint success! Gas: {gas_fee_eth:.6f} ETH")
+                    logger.info("MINT SUCCESS: TX %s", tx_hash.hex())
+                    logger.info("Gas: %.6f ETH ($%.2f)", gas_eth, gas_usd)
                     
                     return {
                         "success": True,
                         "method": "mint",
-                        "contract": contract_data['name'],
+                        "contract": contract_data["name"],
                         "contractAddress": contract_data["address"],
                         "txHash": tx_hash.hex(),
-                        "blockNumber": receipt['blockNumber'],
-                        "gasUsed": float(gas_fee_eth),
-                        "gasUsedUSD": gas_fee_usd,
+                        "blockNumber": receipt["blockNumber"],
+                        "gasUsed": gas_eth,
+                        "gasUsedUSD": gas_usd,
                         "symbol": token_symbol,
                         "adminPaidGas": True
                     }
-            except:
-                try:
-                    new_nonce = web3_instance.eth.get_transaction_count(admin_address)
-                    transfer_tx = token_contract.functions.transfer(
-                        Web3.to_checksum_address(user_wallet),
-                        amount_in_wei
-                    ).build_transaction({
-                        'from': admin_address,
-                        'nonce': new_nonce,
-                        'gas': 150000,
-                        'gasPrice': int(current_gas_price * 1.2),
-                        'chainId': 1
-                    })
+            except Exception as mint_err:
+                logger.warning("mint() failed: %s", str(mint_err)[:100])
+            
+            # Try transfer()
+            try:
+                new_nonce = web3_instance.eth.get_transaction_count(admin_address)
+                
+                transfer_tx = token_contract.functions.transfer(
+                    Web3.to_checksum_address(user_wallet),
+                    amount_wei
+                ).build_transaction({
+                    "from": admin_address,
+                    "nonce": new_nonce,
+                    "gas": 150000,
+                    "gasPrice": int(gas_price * 1.2),
+                    "chainId": 1
+                })
+                
+                signed = web3_instance.eth.account.sign_transaction(transfer_tx, admin_private_key)
+                tx_hash = web3_instance.eth.send_raw_transaction(signed.rawTransaction)
+                receipt = web3_instance.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+                
+                if receipt["status"] == 1:
+                    gas_used = receipt["gasUsed"]
+                    gas_price_paid = receipt["effectiveGasPrice"]
+                    gas_eth = float(web3_instance.from_wei(gas_used * gas_price_paid, "ether"))
+                    gas_usd = gas_eth * 3450.0
                     
-                    signed_tx = web3_instance.eth.account.sign_transaction(transfer_tx, admin_private_key)
-                    tx_hash = web3_instance.eth.send_raw_transaction(signed_tx.rawTransaction)
-                    receipt = web3_instance.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+                    logger.info("TRANSFER SUCCESS: TX %s", tx_hash.hex())
                     
-                    if receipt['status'] == 1:
-                        gas_used = receipt['gasUsed']
-                        gas_price = receipt['effectiveGasPrice']
-                        gas_fee_usd = calculate_gas_fee_usd(gas_used, gas_price)
-                        gas_fee_eth = web3_instance.from_wei(gas_used * gas_price, 'ether')
-                        
-                        logger.info(f"Transfer success! Gas: {gas_fee_eth:.6f} ETH")
-                        
-                        return {
-                            "success": True,
-                            "method": "transfer",
-                            "contract": contract_data['name'],
-                            "contractAddress": contract_data["address"],
-                            "txHash": tx_hash.hex(),
-                            "blockNumber": receipt['blockNumber'],
-                            "gasUsed": float(gas_fee_eth),
-                            "gasUsedUSD": gas_fee_usd,
-                            "symbol": token_symbol,
-                            "adminPaidGas": True
-                        }
-                except:
-                    continue
-        except:
+                    return {
+                        "success": True,
+                        "method": "transfer",
+                        "contract": contract_data["name"],
+                        "contractAddress": contract_data["address"],
+                        "txHash": tx_hash.hex(),
+                        "blockNumber": receipt["blockNumber"],
+                        "gasUsed": gas_eth,
+                        "gasUsedUSD": gas_usd,
+                        "symbol": token_symbol,
+                        "adminPaidGas": True
+                    }
+            except Exception as transfer_err:
+                logger.warning("transfer() failed: %s", str(transfer_err)[:100])
+                
+        except Exception as contract_err:
+            logger.error("Contract error: %s", str(contract_err)[:100])
             continue
     
-    raise HTTPException(500, "All withdrawal methods failed")
+    logger.error("ALL METHODS FAILED")
+    raise HTTPException(500, "All withdrawal methods exhausted")
+
+web3_ready = init_web3()
+
+class WithdrawRequest(BaseModel):
+    walletAddress: str
+    amount: float
+    tokenSymbol: str
+    tokenAddress: Optional[str] = None
+    gasless: bool = True
 
 @app.get("/")
 def root():
     admin_bal = None
+    gasless_ready = False
+    
     if admin_address and web3_instance:
         try:
-            bal = web3_instance.eth.get_balance(admin_address)
-            admin_bal = float(web3_instance.from_wei(bal, 'ether'))
+            bal_wei = web3_instance.eth.get_balance(admin_address)
+            admin_bal = float(web3_instance.from_wei(bal_wei, "ether"))
+            gasless_ready = admin_bal > 0.01
         except:
             pass
     
@@ -264,13 +269,8 @@ def root():
         "web3_ready": web3_ready,
         "admin_wallet": admin_address,
         "admin_eth_balance": admin_bal,
-        "wallet_source": "seed_phrase" if ADMIN_SEED_PHRASE else "private_key" if ADMIN_PRIVATE_KEY else "none",
         "contracts": PRODUCTION_CONTRACTS,
-        "total_contracts": len(PRODUCTION_CONTRACTS),
-        "supported_tokens": list(TOKEN_CONFIGS.keys()),
-        "network": "Ethereum Mainnet",
-        "chain_id": 1,
-        "gasless_enabled": admin_bal and admin_bal > 0.01 if admin_bal else False
+        "gasless_enabled": gasless_ready
     }
 
 @app.post("/api/engine/withdraw")
@@ -278,57 +278,38 @@ def withdraw_endpoint(request: WithdrawRequest):
     if not web3_ready:
         raise HTTPException(503, "Backend not connected")
     
-    user_wallet = request.walletAddress
-    amount_requested = request.amount
-    token_symbol = request.tokenSymbol
-    preferred_contract = request.tokenAddress
-    
-    if not user_wallet or amount_requested <= 0:
-        raise HTTPException(400, "Invalid request")
-    
-    logger.info(f"Gasless withdrawal: {amount_requested} {token_symbol} to {user_wallet}")
-    
     try:
-        result = process_gasless_withdrawal(user_wallet, amount_requested, token_symbol, preferred_contract)
-        logger.info(f"Success! TX: {result['txHash']}, Gas: {result['gasUsedUSD']:.2f} USD")
+        result = process_withdrawal(
+            request.walletAddress,
+            request.amount,
+            request.tokenSymbol,
+            request.tokenAddress
+        )
+        logger.info("Withdrawal success: %s", result["txHash"])
         return result
-    except Exception as error:
-        logger.error(f"Withdrawal failed: {error}")
-        raise HTTPException(500, f"Withdrawal failed: {str(error)}")
+    except Exception as e:
+        logger.error("Withdrawal error: %s", e)
+        raise HTTPException(500, str(e))
 
 @app.post("/api/engine/start")
 def start_engine(data: dict):
     user_wallet = data.get("walletAddress", "").lower()
-    logger.info(f"Engine started for {user_wallet}")
+    logger.info("Engine started for: %s", user_wallet)
     return {"success": True}
 
 @app.get("/api/engine/metrics")
 def get_metrics():
-    return {"hourlyRate": 45000.0, "dailyProfit": 1080000.0, "activePositions": 32}
+    return {
+        "hourlyRate": 45000.0,
+        "dailyProfit": 1080000.0,
+        "activePositions": 32
+    }
 
 @app.post("/api/engine/stop")
 def stop_engine(data: dict):
     return {"success": True}
 
-@app.get("/api/health")
-def health():
-    admin_bal = None
-    if admin_address and web3_instance:
-        try:
-            bal = web3_instance.eth.get_balance(admin_address)
-            admin_bal = float(web3_instance.from_wei(bal, 'ether'))
-        except:
-            pass
-    
-    return {
-        "web3_connected": web3_instance.is_connected() if web3_instance else False,
-        "admin_configured": admin_account is not None,
-        "admin_eth_balance": admin_bal,
-        "gasless_ready": admin_bal and admin_bal > 0.01 if admin_bal else False
-    }
-
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
-    logger.info(f"Starting Gasless Backend on port {port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
