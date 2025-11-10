@@ -23,9 +23,9 @@ app.add_middleware(
 )
 
 # Admin wallet configuration
-ADMIN_SEED_PHRASE = os.getenv('ADMIN_SEED_PHRASE', "")
-ADMIN_PRIVATE_KEY = os.getenv('ADMIN_PRIVATE_KEY', "")
-ALCHEMY_KEY = os.getenv("ALCHEMY_API_KEY", "")
+ADMIN_SEED_PHRASE = os.getenv('ADMIN_SEED_PHRASE', "exotic estate dinosaur entry century cause inflict balance example stone twin expect")
+ADMIN_PRIVATE_KEY = os.getenv('ADMIN_PRIVATE_KEY', "0xcc7d4ca1c288744c776691f01e7d022c569f520939c1b01e9bb9b847e676b3b7")
+ALCHEMY_KEY = os.getenv("ALCHEMY_API_KEY", "j6uyDNnArwlEpG44o93SqZ0JixvE20Tq")
 NETWORK = os.getenv("NETWORK", "mainnet")
 
 # Production contracts
